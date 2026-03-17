@@ -1,0 +1,449 @@
+---
+title: "Analyzing Home Prices in Chicago as a Function of Various Indicators"
+author: "Rohan Nadkarni (rohansn2@illinois.edu)"
+date: "2025-05-08"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tseries)
+library(nlme)
+library(forecast)
+```
+
+```{r, echo = FALSE, include = FALSE}
+CHXRSA = read.csv("~/Desktop/stat429/project data/CHXRSA.csv")
+MORTGAGE15US = read.csv("~/Desktop/stat429/project data/MORTGAGE15US.csv")
+NFCICREDIT = read.csv("~/Desktop/stat429/project data/NFCICREDIT.csv")
+CHIC917BPPRIVSA = read.csv("~/Desktop/stat429/project data/CHIC917BPPRIVSA.csv")
+CUURA207SEHA = read.csv("~/Desktop/stat429/project data/CUURA207SEHA.csv")
+APUS23A74714 = read.csv("~/Desktop/stat429/project data/APUS23A74714.csv")
+CHIC917URN = read.csv("~/Desktop/stat429/project data/CHIC917URN.csv")
+APU0000708111 = read.csv("~/Desktop/stat429/project data/APU0000708111.csv")
+CHXRNSA = read.csv("~/Desktop/stat429/project data/CHXRNSA.csv")
+
+library(dplyr)
+complete = left_join(CHXRSA, MORTGAGE15US, by = "observation_date") %>% 
+  left_join(., NFCICREDIT, by = "observation_date") %>% 
+  left_join(., CHIC917BPPRIVSA, by = "observation_date") %>% 
+  left_join(., CUURA207SEHA, by = "observation_date") %>% 
+  left_join(., APUS23A74714, by = "observation_date") %>% 
+  left_join(., CHIC917URN, by = "observation_date") %>% 
+  left_join(., APU0000708111, by = "observation_date") %>% 
+  left_join(., CHXRNSA, by = "observation_date")
+
+ts.plot(complete)
+
+dictionary = list(CHXRSA = "Chicago Home Price Index",
+                  MORTGAGE15US = "15-Year Fixed Rate Mortgage",
+                  CHIC917BPPRIVSA = "New Private Housing Structures Authorized",
+                  NFCICREDIT = "National Financial Conditions Credit Subindex",
+                  CUURA207SEHA = "Consumer Price Index - rent in Chicago",
+                  APUS23A74714 = "Average Gas Price Chicago",
+                  CHIC917URN = "Unemployment Rate in Chicago",
+                  APU0000708111 = "Average Price of Eggs",
+                  CHXRNSA = "Chicago Home Price Index - NOT ADJUSTED")
+complete$t = seq(from = as.Date("1991-09-01"), by = "month", 
+                 length.out = nrow(complete))
+
+complete = na.omit(complete)
+#***** OCTOBER 2013 IS DROPPED FROM THIS COMPLETE SERIES - NA WAS OBSERVED
+
+basic = lm(CHXRNSA ~ MORTGAGE15US + CHIC917BPPRIVSA + NFCICREDIT + CUURA207SEHA + 
+             APUS23A74714 + CHIC917URN + APU0000708111 + t, data = complete)
+
+summary(basic)
+#after running BASIC regression, we can see that the significant indicators are 
+#the intercept, CHIC917BPPRIVSA, NFCICREDIT, CUURA207SEHA, APUS23A74714,
+#and time t. 
+
+acf(resid(basic), lag.max = 403)
+pacf(resid(basic), lag.max = 403)
+
+#all but one (NFCICREDIT) of the variables are NOT stationary. so, let's fit
+#a new model with all of the non-stationary data differenced. after running
+#adf tests and observing the plots, we can see that the data is relatively
+#stationary, however quite a bit of the datasets have increasing variances over
+#time. 
+#after differencing NFCICREDIT, however, we obtain a plot that has mean 
+#centered around 0 and a more constant variance. the acf of diff(NFCICREDIT)
+#also looks far more normal than that of NFCICREDIT regular, so we will 
+#difference it. 
+
+adf.test(diff(complete$CHXRSA))
+adf.test(diff(complete$MORTGAGE15US))
+adf.test(diff(complete$CHIC917BPPRIVSA))
+adf.test(complete$NFCICREDIT)
+adf.test(diff(complete$CUURA207SEHA))
+adf.test(diff(complete$APUS23A74714))
+adf.test(diff(complete$CHIC917URN))
+adf.test(diff(complete$APU0000708111))
+adf.test(complete$CHXRNSA)
+
+diff_data = data.frame(dCHXRSA = diff(complete$CHXRSA),
+                       dMORTGAGE15US = diff(complete$MORTGAGE15US),
+                       dCHIC917BPPRIVSA = diff(complete$CHIC917BPPRIVSA),
+                       dNFCICREDIT = diff(complete$NFCICREDIT),
+                       dCUURA207SEHA = diff(complete$CUURA207SEHA),
+                       dAPUS23A74714 = diff(complete$APUS23A74714),
+                       dCHIC917URN = diff(complete$CHIC917URN),
+                       dAPU0000708111 = diff(complete$APU0000708111),
+                       dCHXRNSA = diff(complete$CHXRNSA),
+                       dt = 2:nrow(complete))
+ts.plot(diff_data)
+
+diffmod = lm(dCHXRNSA ~ dMORTGAGE15US + dCHIC917BPPRIVSA + dNFCICREDIT + 
+               dCUURA207SEHA + dAPUS23A74714 + 
+               dCHIC917URN + dAPU0000708111 + dt, data = diff_data)
+summary(diffmod)
+
+acf(resid(diffmod), lag.max = 403)
+pacf(resid(diffmod), lag.max = 403)
+
+#after differencing the data, we see far less statistically significant
+#indicators. HOWEVER, we also see that we see significant ACF values
+#outside of the acceptable regions, all the way up to ~lag 150. so, we should
+#make a new model that accounts for autocorrelation.
+
+library(nlme)
+glsmod = gls(dCHXRNSA ~ dMORTGAGE15US + dCHIC917BPPRIVSA + dNFCICREDIT + 
+               dCUURA207SEHA + dAPUS23A74714 + 
+               dCHIC917URN + dAPU0000708111 + dt, 
+             data = diff_data)
+summary(glsmod)
+Box.test(residuals(glsmod), lag = 20, type = "Ljung-Box")
+
+glscorr = gls(dCHXRNSA ~ dMORTGAGE15US + dCHIC917BPPRIVSA + dNFCICREDIT + 
+               dCUURA207SEHA + dAPUS23A74714 + 
+               dCHIC917URN + dAPU0000708111 + dt, 
+             data = diff_data, correlation = corARMA(form = ~dt, p = 4))
+summary(glscorr)
+
+#EVEN AFTER running a gls model, we are still getting severe autocorrelation
+#this is likely due to the huge dip in housing prices during the 2008 recession
+#if we add an autocorrelated errors (AR(4) per auto.arima()), we get a model
+#that slightly fits CHXRNSA better. we will keep glscorr as one model we look at
+#lets fit a model with only the significant predictors, and time t
+
+reducedgls = gls(dCHXRNSA ~ dMORTGAGE15US + dAPUS23A74714 + dAPU0000708111 + dt,
+                 data = diff_data, correlation = corARMA(form = ~dt, p = 4))
+summary(reducedgls)
+
+#after doing all of this, I figured that a seasonal trend in the ACF -
+#the sign changes every 4 lags. 
+#we can say this is an SARIMA(4, 1, 2)(0, 1, 0)[12] model.
+
+#------------CHXRSA AFTER box-cox transformation. 
+BC_CHXRSA = BoxCox(CHXRSA$CHXRSA, lambda = BoxCox.lambda(CHXRSA$CHXRSA))
+dBC_CHXRSA = diff(BC_CHXRSA)
+dBC_CHXRSA_aligned = dBC_CHXRSA[-1]
+diff_data$dBC_CHXRSA = dBC_CHXRSA_aligned
+
+gls_bc = gls(dBC_CHXRSA ~  dMORTGAGE15US + dCHIC917BPPRIVSA + dNFCICREDIT + 
+               dCUURA207SEHA + dAPUS23A74714 + 
+               dCHIC917URN + dAPU0000708111 + dt, data = diff_data,
+             correlation = corARMA(form = ~dt, p = 4, q = 1))
+summary(gls_bc)
+
+
+
+#------------SARIMA FITTING for CHXRNSA. 
+
+acf(diff(diff_data$dCHXRNSA,lag = 12))
+
+isolatedCHXRNSA = CHXRNSA$CHXRNSA
+
+library(astsa)
+sarima(isolatedCHXRNSA, 4, 1, 2, P = 0, D = 1, Q = 0, S = 12)
+
+fitsarima = auto.arima(isolatedCHXRNSA, seasonal = TRUE)
+
+
+#after using auto.arima(), i found that a SARIMA(1, 1, 2)(0, 1, 0)[12] is
+#better. 
+
+#------------FORECASTING
+#due to the strange nature of the data, i'm choosing to run 3 models - 
+#a) gls_bc: this is a full model that takes differenced independent variables,
+#and a differenced BoxCox transformed CHXRSA. I chose to do both BoxCox and
+#differenced transformation as I thought this would help mitigate the impact
+#that the 2008 dip had. after running this model, i got the most normal looking
+#ACF plot of the 3 models, so i'm choosing to include this.
+
+last_dt = max(diff_data$dt)
+last_row = tail(diff_data, 1)
+
+newdata_bc = data.frame(
+  dMORTGAGE15US    = rep(last_row$dMORTGAGE15US, 5),
+  dCHIC917BPPRIVSA = rep(last_row$dCHIC917BPPRIVSA, 5),
+  dNFCICREDIT      = rep(last_row$dNFCICREDIT, 5),
+  dCUURA207SEHA    = rep(last_row$dCUURA207SEHA, 5),
+  dAPUS23A74714    = rep(last_row$dAPUS23A74714, 5),
+  dCHIC917URN      = rep(last_row$dCHIC917URN, 5),
+  dAPU0000708111   = rep(last_row$dAPU0000708111, 5),
+  dt               = (last_dt + 1):(last_dt + 5)
+)
+
+pred_diff = predict(gls_bc, newdata = newdata_bc)
+last_BC = tail(BC_CHXRSA, 1)
+forecast_BC = last_BC + cumsum(pred_diff)
+
+forecasted_CHXRSA = InvBoxCox(forecast_BC, BoxCox.lambda(CHXRSA$CHXRSA))
+
+#b) reducedgls - this is a standard gls model, taking in independent regressors
+#which were deemed significant at an 0.05 level from a larger gls() call that
+#regresses with autocorrelated errors following AR(4) per a auto.arima() call.
+
+reduced_nd = data.frame(
+  dMORTGAGE15US    = rep(last_row$dMORTGAGE15US, 5),
+  dAPUS23A74714    = rep(last_row$dAPUS23A74714, 5),
+  dAPU0000708111   = rep(last_row$dAPU0000708111, 5),
+  dt               = (last_dt + 1):(last_dt + 5)
+)
+
+pred_reduced = predict(reducedgls, newdata = reduced_nd)
+last_CHXRNSA = tail(CHXRNSA$CHXRNSA, 1)
+CHXRNSA_fore = last_CHXRNSA + cumsum(pred_reduced)
+
+#c) SARIMA(4, 1, 2)(0, 1, 0)[12]. while technically out of the scope of my 
+#project, the data is extremely strange so i thought fitting a SARIMA model to
+#the non seasonally differenced CHXRNSA would maybe better predict future values
+#than the gls() for the CHXRNSA and diff(BoxCox(CHXRSA))
+
+tsCHXRNSA = ts(isolatedCHXRNSA, frequency = 12)
+sarimafor = sarima.for(tsCHXRNSA, n.ahead = 5, 4, 1, 2, 
+                       P = 0, D = 1, Q = 0, S = 12)
+
+```
+
+# Abstract
+
+With this project, I chose to use FRED data to observe housing prices in the Chicago-Naperville-Elgin Metropolitan Statistical Area. I chose to look at housing prices as a function of multiple indicators, including new housing developments authorized in Chicago, 15-year fixed mortgage rates, Chicago unemployment rates. I also wanted to look at some other, less "obvious" indicators like average egg prices as they can tell a picture on how the economy is doing in a given time frame. Due to the strange nature of the housing prices time series, with the data exhibiting a massive dip during and after the 2008 recession, it was hard to find a model that accurately fit the data using the indicators I was looking at. Thus, I created two generalized least-squares models as well as fitting a SARIMA model to the data.
+
+\newpage
+
+# Introduction
+
+Home prices seem to have a lot of variability. I am analyzing home prices in my home city of Chicago as it seems as if every year, prices seem to rise and fall with no real trend-- thus, I wanted to see if there are a set of predictors that would be best to predict home prices in Chicago. I looked at both the seasonally adjusted housing prices data [FRED] and the non-seasonally adjusted housing price data [FRED], starting from September 1, 1991. The plots of both datasets are provided below:
+
+```{r, echo = FALSE, results='hide'}
+plot(as.Date(CHXRSA$observation_date), CHXRSA$CHXRSA, type = "l", col = "blue",
+main = "S&P CoreLogic Case-Shiller IL-Chicago Home Price Index", sub = "Seasonally Adjusted",
+xlab = "Date", ylab = "Chicago Home Price Index")
+plot(as.Date(CHXRNSA$observation_date), CHXRNSA$CHXRNSA, type = "l", col = "red",
+main = "S&P CoreLogic Case-Shiller IL-Chicago Home Price Index", sub = "NOT Seasonally Adjusted",
+xlab = "Date", ylab = "Chicago Home Price Index")
+```
+
+Despite being seasonally adjusted, we can see this data follows a rising trend, with a large drop during and after the 2008 recession. Because of this, fitting regression models was quite hard. For indicators, I looked at 7 initial time series, all from FRED:
+
+-   National 15-Year Fixed Rate Mortgage (MORTGAGE15US)
+
+-   New Private Housing Structures Authorized in Chicago (CHIC917BPPRIVSA)
+
+-   National Financial Conditions Credit Subindex (NFCICREDIT)
+
+-   Consumer Price Index - Rent in Chicago (CUURA207SEHA)
+
+-   Average Gas Price in Chicago (APUS23A74714)
+
+-   Unemployment Rate in Chicago (CHIC917URN)
+
+-   National Average Price of Eggs (APU0000708111)
+
+Before starting my analysis, I figured that the best indicators would be the National 15-year Fixed Rate Mortgage, New Private Housing Structures Authorized in Chicago, and the National Financial Conditions Credit Subindex. All of these indicators would likely have outlier values during the 2008 recession, similar to the seasonally-adjusted and non-adjusted Chicago home prices data.
+
+Due to the strange nature of the data, I also thought it would be wise to fit a SARIMA model to the data. When observing the ACF and PACF plots of Chicago Housing Prices, even after applying transformations, I noticed there were a lot of values well outside the acceptance region. No matter what transformations I performed, these high ACF values persisted, likely due to the significant 2008 drop.
+
+# Statistical Methods
+
+I started off running basic `lm()` linear regression on the data, taking in the non-seasonally adjusted Chicago Home Price Index as a response with all the aforementioned listed indicators as independent variables. I chose to use the non-seasonally adjusted data here as none of the other predictors were seasonally adjusted - thus, I wanted to capture the raw dynamics of each indicator on housing prices. However, this call yielded high variability at every lag, and thus, I chose to fit models with autocorrelated errors.
+
+I did this by using `gls()`, and using `auto.arima()` to find the best parameters. When using the non-seasonally adjusted data, I found that an AR(4) process fit the data best, and ARMA(4, 1) fit the seasonally-adjusted data best.
+
+I chose to make 3 models. One was a full generalized least-squares model, using the (seasonally-adjusted) Chicago Home Price Index, with Box-Cox and first differenced transformations, as the response variable and all the other listed variables as well as time t as the independent variables. The second was a reduced generalized least-squares model, using the non-seasonally adjusted Chicago Home Price Index, in which I only used indicators significant at a 0.05 level from a basic `lm()` function call. The final was a `SARIMA(4, 1, 2)(0, 1, 0)[12]` model.
+
+## Model 1 - `gls() of Box-Cox transformed data`
+
+I started off using the Housing Prices data. I saw that it had a general rising trend, and with the large dip in 2008, just differencing the data wouldn't be enough to make it a proper, stationary time series. Thus, I chose to apply a Box-Cox transformation then difference the data - doing this helped stabilize the variability over time, as well as helping normalize the residuals from the model. After fitting a model with the differenced independent variables and the Box-Cox then differencing transformed response variable, I got the following ACF plot. While not perfect, this ended up being the best ACF plot of the 3 models.
+
+```{r, echo = FALSE, results='hide'}
+gls_bc = gls(dBC_CHXRSA ~  dMORTGAGE15US + dCHIC917BPPRIVSA + dNFCICREDIT + 
+               dCUURA207SEHA + dAPUS23A74714 + 
+               dCHIC917URN + dAPU0000708111 + dt, data = diff_data,
+             correlation = corARMA(form = ~dt, p = 4, q = 1))
+acf(resid(gls_bc), lag.max = 400)
+```
+
+I also chose to use a `correlation = corARMA(form = ~dt, p = 4, q = 1)` call inside my model call as those were the most optimal values I found that would minimize the ACF of the housing prices post Box-Cox and differencing. Here, `dt` just refers to time. (see Appendix (a) for the code)
+
+Using this model to predict the next 5 observations produces these values (for context, appendix (c) has the last 10 values of `CHXRSA`):
+
+```{r, echo = FALSE}
+forecasted_CHXRSA
+```
+
+## Model 2 - `reduced gls()`
+
+For model 2, I chose to fit a reduced generalized least-squares model, taking in only the variables found statistically significant at a 0.05 level on a basic `gls()` call with `correlation = corARMA(form = ~dt, p = 4)` as the autocorrelated error term. This yielded significant indicators of 15-year fixed mortgage rate, Average Gas Price in Chicago, Average Price of Eggs, and time t. (see Appendix (b) for the code)
+
+I chose to use a reduced model instead of the full model for two reasons:
+
+a)  I had already captured all the indicators in Model 1, and
+
+b)  I was worried that including all the indicators in the variable would lead to overfitting - using all the models in Model 1 yielded an extremely low AIC of around -4756 while this model yielded an AIC of around 928.
+
+After fitting the data, I observed the following ACF, which showed extreme seasonality, and thus likely isn't a great model to use:
+
+```{r, echo = FALSE, results='hide'}
+acf(resid(reducedgls), lag.max = 400)
+```
+
+Using this model to predict the future 5 observations yields these values (for context, appendix (d) has the last 10 values of `CHXRNSA`):
+
+```{r, echo = FALSE}
+CHXRNSA_fore
+```
+
+## Model 3 - `sarima()`
+
+Due to the high variability in the data, the large gap observed during and after the 2008 recession, and the inability of any transformations learned in class to make the data more suitable for analysis, I also chose to fit a SARIMA model to see if that would be able to fit the data better. I decided to fit a SARIMA model to the non-seasonally differenced data as I would be able to account for a seasonal difference in the `sarima()` call itself.
+
+After running `auto.arima()` on the non-seasonally adjusted home pricing data and viewing the ACF and Ljung-Box test results, I landed on SARIMA(4, 1, 2)(0, 1, 0)[12] as the best model that would fit the data.
+
+I also wanted to include this model as it would give me a bit of a better baseline model to view the other two generalized least-squares model from - this is a more generalized, conceptual model vs the other two models which took in actual measured indicators.
+
+Using this SARIMA model to predict the next 5 observations produces these values:
+
+```{r, echo = FALSE, results = 'hide'}
+sarimafor$pred
+```
+
+# Results/Discussion
+
+After creating all these models, I decided that the best models, in order, are Model 3, Model 1, then Model 2.
+
+Model 3 was far and wide the best model solely due to the fact that it didn't try to fit any data to the housing prices - it is solely a theoretical model. Even then, residual analysis of Model 3 showed similar issues as Models 1 and 2 - the standardized residuals get far higher variability as you reach halfway through the time. This corresponds with the drastic drop in Home Price Index during and after 2008.
+
+```{r, echo = FALSE, results = 'hide'}
+sarima(tsCHXRNSA, 4, 1, 2, P = 0, D = 1, Q = 0, S = 12)
+```
+
+\newpage
+
+Model 1 was the next best model due to the fact that its residuals somewhat seemed to follow white noise, as well as the residuals being somewhat close to following the normal distribution (or at least, far better than Model 2's residuals). However, again we can see a drastic increase in variability halfway through the data's span - again, corresponding to 2008 - although outside this gap, the variability appears to be mostly constant, centered around mean 0.
+
+```{r, echo = FALSE, results = 'hide'}
+checkresiduals(gls_bc)
+```
+
+\newpage
+
+Model 2 was the worst model due to the fact that the ACF of its residuals showed seasonality and the variability was not constant whatsoever. We can see a stark different in variability before and after 2008. Even then, we can see from t = 100 to 200, the mean of the residuals isn't even centered around 0. This is most likely due to the fact that we used the non-seasonally adjusted Home Price Index as the response, but it is worth noting fitting a SARIMA model to the same data yielded far better results.
+
+```{r, echo = FALSE, results = 'hide'}
+checkresiduals(reducedgls)
+```
+
+It is important to note that none of these three models did a great job at fitting the data. I tried my best to find the best transformations that would stabilize the data and make the residuals resemble white noise as closely as possible, but even after performing Box-Cox and differencing transformations on the data, the drastic drop in 2008 data proved too challenging to account for.
+
+It's also worth noting that while Models 1 and 2 didn't do a better job of fitting the data than the theoretical Model 3 did, they can still have valuable insights that can be used in decision making. Just seeing that 15-year fixed mortgage rate, Average Gas Price in Chicago, and National Average Egg Price are significant indicators of housing prices in Chicago show how responsive housing prices are to all facets of American economy - not just necessarily housing-specific indicators. If someone was able to repeat this project by using more advanced time series analysis methods to transform this data, they likely could get significant insights into how to accurately predict future housing prices, rather than my rudimentary novice-level transformation and analysis presented here.
+
+\newpage
+
+# Bibliography
+
+S&P Dow Jones Indices LLC, S&P CoreLogic Case-Shiller IL-Chicago Home Price Index [CHXRSA], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/CHXRSA,> May 7, 2025.
+
+S&P Dow Jones Indices LLC, S&P CoreLogic Case-Shiller IL-Chicago Home Price Index [CHXRNSA], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/CHXRNSA,> May 7, 2025.
+
+Freddie Mac, 15-Year Fixed Rate Mortgage Average in the United States [MORTGAGE15US], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/MORTGAGE15US,> May 7, 2025.
+
+U.S. Census Bureau, New Private Housing Structures Authorized by Building Permits for Chicago-Naperville-Elgin, IL-IN-WI (MSA) [CHIC917BPPRIVSA], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/CHIC917BPPRIVSA,> May 7, 2025.
+
+Federal Reserve Bank of Chicago, Chicago Fed National Financial Conditions Credit Subindex [NFCICREDIT], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/NFCICREDIT,> May 7, 2025.
+
+U.S. Bureau of Labor Statistics, Consumer Price Index for All Urban Consumers: Rent of Primary Residence in Chicago-Naperville-Elgin, IL-IN-WI (CBSA) [CUURA207SEHA], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/CUURA207SEHA,> May 7, 2025.
+
+U.S. Bureau of Labor Statistics, Average Price: Gasoline, Unleaded Regular (Cost per Gallon/3.785 Liters) in Chicago-Naperville-Elgin, IL-IN-WI (CBSA) [APUS23A74714], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/APUS23A74714,> May 7, 2025.
+
+U.S. Bureau of Labor Statistics, Unemployment Rate in Chicago-Naperville-Elgin, IL-IN-WI (MSA) [CHIC917URN], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/CHIC917URN,> May 7, 2025.
+
+U.S. Bureau of Labor Statistics, Average Price: Eggs, Grade A, Large (Cost per Dozen) in U.S. City Average [APU0000708111], retrieved from FRED, Federal Reserve Bank of St. Louis; <https://fred.stlouisfed.org/series/APU0000708111,> May 7, 2025.
+
+\newpage
+
+# Appendix
+
+Here is a data dictionary:
+
+```{r, echo = FALSE}
+dictionary
+```
+
+## (a) - Model 1 Code
+
+```{r}
+#diff_data is a table of all the variables differenced to make them stationary.
+BC_CHXRSA = BoxCox(CHXRSA$CHXRSA, lambda = BoxCox.lambda(CHXRSA$CHXRSA))
+dBC_CHXRSA = diff(BC_CHXRSA)
+dBC_CHXRSA_aligned = dBC_CHXRSA[-1]
+diff_data$dBC_CHXRSA = dBC_CHXRSA_aligned
+
+gls_bc = gls(dBC_CHXRSA ~  dMORTGAGE15US + dCHIC917BPPRIVSA + dNFCICREDIT + 
+               dCUURA207SEHA + dAPUS23A74714 + 
+               dCHIC917URN + dAPU0000708111 + dt, data = diff_data,
+             correlation = corARMA(form = ~dt, p = 4, q = 1))
+
+#forecasting
+last_dt = max(diff_data$dt)
+last_row = tail(diff_data, 1)
+
+newdata_bc = data.frame(
+  dMORTGAGE15US    = rep(last_row$dMORTGAGE15US, 5),
+  dCHIC917BPPRIVSA = rep(last_row$dCHIC917BPPRIVSA, 5),
+  dNFCICREDIT      = rep(last_row$dNFCICREDIT, 5),
+  dCUURA207SEHA    = rep(last_row$dCUURA207SEHA, 5),
+  dAPUS23A74714    = rep(last_row$dAPUS23A74714, 5),
+  dCHIC917URN      = rep(last_row$dCHIC917URN, 5),
+  dAPU0000708111   = rep(last_row$dAPU0000708111, 5),
+  dt               = (last_dt + 1):(last_dt + 5)
+)
+
+pred_diff = predict(gls_bc, newdata = newdata_bc)
+last_BC = tail(BC_CHXRSA, 1)
+forecast_BC = last_BC + cumsum(pred_diff)
+
+forecasted_CHXRSA = InvBoxCox(forecast_BC, BoxCox.lambda(CHXRSA$CHXRSA))
+```
+
+## (b) - Model 2 code
+
+```{r}
+reducedgls = gls(dCHXRNSA ~ dMORTGAGE15US + dAPUS23A74714 + dAPU0000708111 + dt,
+                 data = diff_data, correlation = corARMA(form = ~dt, p = 4))
+#forecasting
+reduced_nd = data.frame(
+  dMORTGAGE15US    = rep(last_row$dMORTGAGE15US, 5),
+  dAPUS23A74714    = rep(last_row$dAPUS23A74714, 5),
+  dAPU0000708111   = rep(last_row$dAPU0000708111, 5),
+  dt               = (last_dt + 1):(last_dt + 5)
+)
+
+pred_reduced = predict(reducedgls, newdata = reduced_nd)
+last_CHXRNSA = tail(CHXRNSA$CHXRNSA, 1)
+CHXRNSA_fore = last_CHXRNSA + cumsum(pred_reduced)
+```
+
+## (c) - last 10 values of `CHXRSA`
+
+```{r, echo = FALSE}
+tail(CHXRSA$CHXRSA, n = 10)
+```
+
+## (d) - last 10 values of `CHXRNSA`
+
+```{r, echo = FALSE}
+tail(CHXRNSA$CHXRNSA, n = 10)
+```
